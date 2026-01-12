@@ -1,10 +1,3 @@
-Jeśli kod "nie działa", najczęstszym powodem (poza błędnymi kluczami) jest to, że Supabase zwraca dane w specyficznym formacie, a biblioteka czasem wymaga dokładnego wskazania nazw tabel.
-
-Poniżej przesyłam poprawioną i bardziej odporną wersję kodu. Dodałem w niej obsługę błędów oraz upewniłem się, że relacja między tabelami (pobieranie nazwy kategorii) jest obsłużona poprawnie.
-
-Poprawiony Kod app.py
-Python
-
 import streamlit as st
 from supabase import create_client, Client
 
