@@ -1,74 +1,97 @@
 import streamlit as st
+from supabase import create_client, Client
 
-# 1. Inicjalizacja danych w sesji
-if 'magazyn' not in st.session_state:
-    st.session_state.magazyn = []
+# --- KONFIGURACJA POŁĄCZENIA ---
+# Dane pobierane są bezpiecznie ze Streamlit Secrets
+URL = st.secrets["SUPABASE_URL"]
+KEY = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(URL, KEY)
 
-if 'kategorie' not in st.session_state:
-    # Początkowe domyślne kategorie
-    st.session_state.kategorie = ["Ogólne", "Spożywcze", "Elektronika"]
+st.title("📦 Magazyn z bazą Supabase")
 
-st.title("📦 Magazyn z własnymi kategoriami")
+# --- FUNKCJE POMOCNICZE (Operacje na bazie) ---
 
-# --- PANEL BOCZNY: Zarządzanie Kategoriami ---
+def pobierz_kategorie():
+    """Pobiera listę kategorii z tabeli 'kategorie'"""
+    res = supabase.table("kategorie").select("*").execute()
+    return res.data
+
+def pobierz_produkty():
+    """Pobiera produkty wraz z nazwami ich kategorii (JOIN)"""
+    res = supabase.table("magazyn").select("id, nazwa, ilosc, kategorie(nazwa)").execute()
+    return res.data
+
+# --- PANEL BOCZNY: Kategorie ---
 st.sidebar.header("Ustawienia Kategorii")
 nowa_kat = st.sidebar.text_input("Nazwa nowej kategorii")
 if st.sidebar.button("Dodaj kategorię"):
-    if nowa_kat and nowa_kat not in st.session_state.kategorie:
-        st.session_state.kategorie.append(nowa_kat)
-        st.sidebar.success(f"Dodano kategorię: {nowa_kat}")
-    elif nowa_kat in st.session_state.kategorie:
-        st.sidebar.warning("Ta kategoria już istnieje.")
+    if nowa_kat:
+        try:
+            supabase.table("kategorie").insert({"nazwa": nowa_kat}).execute()
+            st.sidebar.success(f"Dodano kategorię: {nowa_kat}")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error("Błąd: Kategoria może już istnieć.")
 
 st.sidebar.divider()
 
-# --- PANEL BOCZNY: Dodawanie produktów ---
-st.sidebar.header("Dodaj nowy towar")
-nazwa = st.sidebar.text_input("Nazwa towaru")
-# Lista rozwijana korzysta teraz z dynamicznej listy st.session_state.kategorie
-kategoria = st.sidebar.selectbox("Wybierz kategorię", st.session_state.kategorie)
-ilosc = st.sidebar.number_input("Ilość", min_value=1, value=1)
+# --- PANEL BOCZNY: Dodawanie towaru ---
+st.sidebar.header("Dodaj towar")
+kategorie_z_bazy = pobierz_kategorie()
+# Tworzymy słownik {nazwa: id}, aby łatwo zapisywać relację w bazie
+opcje_kat = {k['nazwa']: k['id'] for k in kategorie_z_bazy}
+
+nazwa_towaru = st.sidebar.text_input("Nazwa towaru")
+wybrana_kat = st.sidebar.selectbox("Wybierz kategorię", list(opcje_kat.keys()))
+ilosc_towaru = st.sidebar.number_input("Ilość", min_value=1, value=1)
 
 if st.sidebar.button("Dodaj do magazynu"):
-    if nazwa:
-        nowy_towar = {"nazwa": nazwa, "kategoria": kategoria, "ilosc": ilosc}
-        st.session_state.magazyn.append(nowy_towar)
-        st.success(f"Dodano: {nazwa}")
+    if nazwa_towaru:
+        supabase.table("magazyn").insert({
+            "nazwa": nazwa_towaru,
+            "kategoria_id": opcje_kat[wybrana_kat],
+            "ilosc": ilosc_towaru
+        }).execute()
+        st.success(f"Dodano: {nazwa_towaru}")
+        st.rerun()
     else:
-        st.error("Podaj nazwę towaru!")
+        st.error("Wpisz nazwę towaru!")
 
-# --- GŁÓWNA SEKCJA: Lista i Usuwanie ---
+# --- GŁÓWNA SEKCJA: Lista produktów ---
 st.subheader("Aktualny stan magazynu")
+produkty = pobierz_produkty()
 
-if not st.session_state.magazyn:
-    st.info("Magazyn jest pusty. Dodaj pierwszy produkt w panelu bocznym.")
+if not produkty:
+    st.info("Magazyn jest pusty.")
 else:
-    for i, towar in enumerate(st.session_state.magazyn):
+    for p in produkty:
         cols = st.columns([3, 2, 1, 1])
-        cols[0].write(f"**{towar['nazwa']}**")
-        cols[1].write(f"📁 {towar['kategoria']}")
-        cols[2].write(f"szt: {towar['ilosc']}")
+        cols[0].write(f"**{p['nazwa']}**")
+        # Dostęp do nazwy kategorii przez relację (kategorie.nazwa)
+        nazwa_k = p.get('kategorie', {}).get('nazwa', 'Brak')
+        cols[1].write(f"📁 {nazwa_k}")
+        cols[2].write(f"szt: {p['ilosc']}")
         
-        if cols[3].button("Usuń", key=f"del_{i}"):
-            st.session_state.magazyn.pop(i)
+        if cols[3].button("Usuń", key=f"del_{p['id']}"):
+            supabase.table("magazyn").delete().eq("id", p['id']).execute()
             st.rerun()
 
 # --- RAPORT ---
 st.divider()
-st.subheader("📊 Raport o stanie magazynu")
-
-if st.button("Generuj raport"):
-    if st.session_state.magazyn:
-        # Grupowanie danych
-        raport = {}
-        for t in st.session_state.magazyn:
-            kat = t['kategoria']
-            raport[kat] = raport.get(kat, 0) + t['ilosc']
+st.subheader("📊 Raport")
+if st.button("Generuj raport stanu"):
+    if produkty:
+        st.write("**Podsumowanie:**")
+        # Proste sumowanie ilości dla raportu
+        suma_sztuk = sum(item['ilosc'] for item in produkty)
+        st.write(f"Łączna ilość wszystkich towarów: **{suma_sztuk}**")
         
-        # Wyświetlanie wyników
-        for kat, suma in raport.items():
-            st.info(f"Kategoria **{kat}**: {suma} sztuk łącznie")
+        # Wyświetlenie podziału na kategorie
+        raport_kat = {}
+        for p in produkty:
+            n_kat = p.get('kategorie', {}).get('nazwa', 'Brak')
+            raport_kat[n_kat] = raport_kat.get(n_kat, 0) + p['ilosc']
         
-        st.write(f"Łączna liczba unikalnych produktów: {len(st.session_state.magazyn)}")
+        st.table(raport_kat)
     else:
-        st.warning("Magazyn jest pusty – nie można wygenerować raportu.")
+        st.warning("Brak danych do raportu.")
