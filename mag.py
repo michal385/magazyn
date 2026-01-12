@@ -1,72 +1,58 @@
 import streamlit as st
 
-# Konfiguracja strony
-st.set_page_config(page_title="Magazyn z Ilościami", page_icon="📦")
-
-st.title("📦 Magazyn z zarządzaniem ilością")
-
-# Inicjalizacja magazynu w sesji (słownik: nazwa -> ilość)
+# Inicjalizacja magazynu w sesji (dzięki temu dane nie znikają po kliknięciu przycisku)
 if 'magazyn' not in st.session_state:
-    st.session_state.magazyn = {"Chleb": 10, "Mleko": 5}
+    st.session_state.magazyn = []
 
-# --- SEKCJA DODAWANIA NOWEGO PRODUKTU ---
-st.subheader("Dodaj nowy produkt do bazy")
-col_a, col_b = st.columns([2, 1])
+st.title("📦 Prosty System Magazynowy")
 
-with col_a:
-    nowy_towar = st.text_input("Nazwa nowego towaru:", placeholder="Np. Jabłka")
-with col_b:
-    ilosc_poczatkowa = st.number_input("Ilość startowa:", min_value=0, value=1)
+# --- PANEL BOCZNY: Dodawanie produktów ---
+st.sidebar.header("Dodaj nowy towar")
+nazwa = st.sidebar.text_input("Nazwa towaru")
+kategoria = st.sidebar.selectbox("Kategoria", ["Spożywcze", "Elektronika", "Dom i Ogród", "Inne"])
+ilosc = st.sidebar.number_input("Ilość", min_value=1, value=1)
 
-if st.button("Dodaj do bazy"):
-    if nowy_towar:
-        if nowy_towar not in st.session_state.magazyn:
-            st.session_state.magazyn[nowy_towar] = ilosc_poczatkowa
-            st.success(f"Dodano produkt: {nowy_towar}")
-            st.rerun()
-        else:
-            st.warning("Ten produkt już istnieje! Użyj przycisków poniżej, aby zmienić ilość.")
+if st.sidebar.button("Dodaj do magazynu"):
+    if nazwa:
+        nowy_towar = {"nazwa": nazwa, "kategoria": kategoria, "ilosc": ilosc}
+        st.session_state.magazyn.append(nowy_towar)
+        st.success(f"Dodano: {nazwa}")
     else:
-        st.error("Wpisz nazwę produktu.")
+        st.error("Podaj nazwę towaru!")
 
-st.divider()
-
-# --- SEKCJA ZARZĄDZANIA STANEM ---
-st.subheader("Aktualne stany magazynowe")
+# --- GŁÓWNA SEKCJA: Lista i Usuwanie ---
+st.subheader("Aktualny stan magazynu")
 
 if not st.session_state.magazyn:
     st.info("Magazyn jest pusty.")
 else:
-    # Nagłówki tabeli
-    h1, h2, h3, h4 = st.columns([2, 2, 1, 1])
-    h1.write("**Produkt**")
-    h2.write("**Zmień ilość**")
-    h3.write("**Stan**")
-    h4.write("**Akcja**")
+    # Wyświetlanie listy towarów z opcją usunięcia
+    for i, towar in enumerate(st.session_state.magazyn):
+        cols = st.columns([3, 2, 1, 1])
+        cols[0].write(f"**{towar['nazwa']}**")
+        cols[1].write(f"📁 {towar['kategoria']}")
+        cols[2].write(f"szt: {towar['ilosc']}")
+        
+        if cols[3].button("Usuń", key=f"del_{i}"):
+            st.session_state.magazyn.pop(i)
+            st.rerun()
 
-    # Wyświetlanie produktów
-    # Tworzymy kopię kluczy, aby móc bezpiecznie usuwać elementy podczas iteracji
-    for produkt in list(st.session_state.magazyn.keys()):
-        c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
+# --- RAPORT ---
+st.divider()
+st.subheader("📊 Raport o stanie magazynu")
+
+if st.button("Generuj raport"):
+    if st.session_state.magazyn:
+        # Grupowanie danych do raportu
+        raport = {}
+        for t in st.session_state.magazyn:
+            kat = t['kategoria']
+            raport[kat] = raport.get(kat, 0) + t['ilosc']
         
-        with c1:
-            st.write(f"**{produkt}**")
+        st.write("Podsumowanie ilościowe wg kategorii:")
+        for kat, suma in raport.items():
+            st.info(f"{kat}: **{suma} szt.**")
         
-        with c2:
-            # Przyciski + i - w jednej linii
-            sub_col1, sub_col2 = st.columns(2)
-            if sub_col1.button("➕", key=f"add_{produkt}"):
-                st.session_state.magazyn[produkt] += 1
-                st.rerun()
-            if sub_col2.button("➖", key=f"sub_{produkt}"):
-                if st.session_state.magazyn[produkt] > 0:
-                    st.session_state.magazyn[produkt] -= 1
-                    st.rerun()
-        
-        with c3:
-            st.write(f"{st.session_state.magazyn[produkt]} szt.")
-            
-        with c4:
-            if st.button("Usuń", key=f"del_{produkt}"):
-                del st.session_state.magazyn[produkt]
-                st.rerun()
+        st.write(f"Całkowita liczba pozycji w magazynie: {len(st.session_state.magazyn)}")
+    else:
+        st.warning("Brak danych do wygenerowania raportu.")
