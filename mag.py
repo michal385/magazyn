@@ -1,104 +1,94 @@
 import streamlit as st
-from supabase import create_client, Client
 
-# --- 1. POŁĄCZENIE I DIAGNOSTYKA ---
-@st.cache_resource
-def init_connection():
-    try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
-    except Exception as e:
-        st.error(f"Problem z kluczami Secrets: {e}")
-        return None
+# 1. Inicjalizacja danych (Session State)
+if 'magazyn' not in st.session_state:
+    st.session_state.magazyn = []
 
-supabase = init_connection()
+if 'kategorie' not in st.session_state:
+    st.session_state.kategorie = ["Ogólne", "Spożywcze", "Elektronika"]
 
-st.title("📦 Magazyn v3 (Stabilny)")
+st.set_page_config(page_title="Magazyn v2", layout="wide")
+st.title("📦 Prosty Magazyn z Zarządzaniem Kategoriami")
 
-if supabase:
-    # --- 2. FUNKCJE POBIERANIA DANYCH ---
-    def get_categories():
-        res = supabase.table("kategorie").select("*").execute()
-        return res.data if res.data else []
+# --- PANEL BOCZNY: Kategorie ---
+st.sidebar.header("⚙️ Zarządzanie Kategoriami")
 
-    def get_products():
-        # Pobieramy wszystko z tabeli magazyn i dołączamy nazwę z tabeli kategorie
-        res = supabase.table("magazyn").select("id, nazwa, ilosc, kategorie(nazwa)").execute()
-        return res.data if res.data else []
+# Dodawanie kategorii
+nowa_kat = st.sidebar.text_input("Dodaj nową kategorię")
+if st.sidebar.button("Dodaj"):
+    if nowa_kat and nowa_kat not in st.session_state.kategorie:
+        st.session_state.kategorie.append(nowa_kat)
+        st.rerun()
 
-    # --- 3. PANEL BOCZNY (Dodawanie) ---
-    st.sidebar.header("Zarządzanie")
+st.sidebar.write("---")
+
+# Usuwanie kategorii
+st.sidebar.subheader("Usuń kategorię")
+kat_do_usuniecia = st.sidebar.selectbox("Wybierz kategorię do usunięcia", st.session_state.kategorie)
+if st.sidebar.button("Usuń kategorię"):
+    # Sprawdzenie, czy kategoria jest używana przez jakiś towar
+    uzywana = any(p['kategoria'] == kat_do_usuniecia for p in st.session_state.magazyn)
     
-    # Dodawanie kategorii
-    with st.sidebar.expander("Dodaj nową kategorię"):
-        n_kat = st.text_input("Nazwa kategorii")
-        if st.button("Zapisz kategorię"):
-            if n_kat:
-                supabase.table("kategorie").insert({"nazwa": n_kat}).execute()
-                st.rerun()
-
-    st.sidebar.divider()
-
-    # Dodawanie produktu
-    st.sidebar.subheader("Dodaj produkt")
-    kategorie = get_categories()
-    
-    if kategorie:
-        kat_map = {k['nazwa']: k['id'] for k in kategorie}
-        p_nazwa = st.sidebar.text_input("Nazwa towaru")
-        p_kat = st.sidebar.selectbox("Kategoria", list(kat_map.keys()))
-        p_ilosc = st.sidebar.number_input("Ilość", min_value=1, value=1)
-        
-        if st.sidebar.button("Dodaj do bazy"):
-            if p_nazwa:
-                supabase.table("magazyn").insert({
-                    "nazwa": p_nazwa,
-                    "kategoria_id": kat_map[p_kat],
-                    "ilosc": p_ilosc
-                }).execute()
-                st.rerun()
+    if uzywana:
+        st.sidebar.error("Nie można usunąć kategorii, która jest przypisana do produktów!")
+    elif len(st.session_state.kategorie) <= 1:
+        st.sidebar.warning("Musi zostać przynajmniej jedna kategoria.")
     else:
-        st.sidebar.info("Dodaj najpierw kategorię.")
+        st.session_state.kategorie.remove(kat_do_usuniecia)
+        st.rerun()
 
-    # --- 4. WYŚWIETLANIE LISTY ---
-    st.subheader("Lista towarów")
-    produkty = get_products()
+# --- GŁÓWNA SEKCJA: Dodawanie towaru ---
+st.subheader("➕ Dodaj nowy towar")
+c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
 
-    if not produkty:
-        st.info("Brak towarów w bazie.")
-    else:
-        for p in produkty:
-            col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
-            
-            # Bezpieczne wyciąganie nazwy kategorii (obsługa różnych wersji zwracanych danych)
-            kat_data = p.get('kategorie')
-            if isinstance(kat_data, list) and len(kat_data) > 0:
-                nazwa_k = kat_data[0].get('nazwa', 'Brak')
-            elif isinstance(kat_data, dict):
-                nazwa_k = kat_data.get('nazwa', 'Brak')
-            else:
-                nazwa_k = "Ogólne"
-
-            col1.write(f"**{p['nazwa']}**")
-            col2.write(f"📁 {nazwa_k}")
-            col3.write(f"{p['ilosc']} szt.")
-            
-            if col4.button("🗑️", key=f"del_{p['id']}"):
-                supabase.table("magazyn").delete().eq("id", p['id']).execute()
-                st.rerun()
-
-    # --- 5. RAPORT ---
-    if st.button("📊 Generuj raport"):
-        st.divider()
-        if produkty:
-            total = sum(p['ilosc'] for p in produkty)
-            st.metric("Suma wszystkich towarów", f"{total} szt.")
-            # Wyświetlenie surowych danych dla debugowania (opcjonalnie)
-            # st.write(produkty) 
+with c1:
+    nazwa_t = st.text_input("Nazwa produktu", key="nazwa_t")
+with c2:
+    kat_t = st.selectbox("Wybierz kategorię", st.session_state.kategorie)
+with c3:
+    ilosc_t = st.number_input("Ilość", min_value=1, value=1)
+with c4:
+    st.write(" ") # Odstęp dla wyrównania
+    if st.button("Dodaj produkt"):
+        if nazwa_t:
+            st.session_state.magazyn.append({
+                "nazwa": nazwa_t,
+                "kategoria": kat_t,
+                "ilosc": ilosc_t
+            })
+            st.rerun()
         else:
-            st.warning("Brak danych.")
+            st.error("Podaj nazwę!")
 
-# --- 6. LISTA KONTROLNA (Co sprawdzić, jeśli nadal nie działa) ---
+st.divider()
+
+# --- LISTA TOWARÓW ---
+st.subheader("📋 Lista towarów w magazynie")
+
+if not st.session_state.magazyn:
+    st.info("Magazyn jest pusty.")
 else:
-    st.warning("Aplikacja nie mogła połączyć się z bazą.")
+    for i, p in enumerate(st.session_state.magazyn):
+        col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+        col1.write(f"**{p['nazwa']}**")
+        col2.write(f"📁 {p['kategoria']}")
+        col3.write(f"{p['ilosc']} szt.")
+        if col4.button("Usuń", key=f"del_{i}"):
+            st.session_state.magazyn.pop(i)
+            st.rerun()
+
+# --- RAPORT ---
+st.divider()
+if st.button("📊 Generuj raport stanu"):
+    st.subheader("Raport zbiorczy")
+    if st.session_state.magazyn:
+        raport = {}
+        for p in st.session_state.magazyn:
+            k = p['kategoria']
+            raport[k] = raport.get(k, 0) + p['ilosc']
+        
+        # Wyświetlenie statystyk
+        st.table(list(raport.items()))
+        st.write(f"**Łączna liczba wszystkich przedmiotów:** {sum(raport.values())}")
+    else:
+        st.warning("Brak danych do raportu.")
